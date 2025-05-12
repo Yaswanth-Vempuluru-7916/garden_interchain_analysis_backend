@@ -11,11 +11,11 @@ app.use(express.json());
 
 // Pool for stage_db (source data)
 const stagePool = new Pool({
-  user: process.env.STAGE_DB_USER,
-  host: process.env.STAGE_DB_HOST,
-  database: process.env.STAGE_DB_NAME,
-  password: process.env.STAGE_DB_PASSWORD,
-  port: Number(process.env.STAGE_DB_PORT),
+  user: process.env.MAIN_DB_USER,
+  host: process.env.MAIN_DB_HOST,
+  database: process.env.MAIN_DB_NAME,
+  password: process.env.MAIN_DB_PASSWORD,
+  port: Number(process.env.MAIN_DB_PORT),
 });
 
 // Pool for garden_interchain_analysis (storing results)
