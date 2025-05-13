@@ -1,5 +1,4 @@
 import { Pool } from "pg";
-import fetch from "node-fetch";
 import { Alchemy, Network } from "alchemy-sdk";
 import axios from "axios";
 import { ethers } from "ethers";
@@ -39,7 +38,7 @@ const alchemyInstances = {
   }),
 };
 
-const citreaProvider = new ethers.JsonRpcProvider(process.env.RPC_URL_CITREA);
+// const citreaProvider = new ethers.JsonRpcProvider(process.env.RPC_URL_CITREA);
 
 interface StarkNetRpcResponse {
   jsonrpc: string;
