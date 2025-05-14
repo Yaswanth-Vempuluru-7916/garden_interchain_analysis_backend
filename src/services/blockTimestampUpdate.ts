@@ -15,13 +15,10 @@ const requiredEnvVars = [
   "ANALYSIS_DB_PASSWORD",
   "ANALYSIS_DB_PORT",
   "ALCHEMY_TOKEN",
-  "RPC_URL_CITREA",
   "RPC_URL_STARKNET",
-  "RPC_URL_MONAD",
   "RPC_URL_HYPERLIQUID",
   "RPC_URL_BITCOIN",
   "RPC_URL_BERA",
-  "SUPPORTED_CHAINS",
 ];
 const missingEnvVars = requiredEnvVars.filter((varName) => !process.env[varName]);
 if (missingEnvVars.length > 0) {
