@@ -34,7 +34,7 @@ export const initTable = async () => {
   try {
     await analysisPool.query(createTableQuery);
     console.log(
-      "${ORDERS_TABLE} table ensured with TIMESTAMPTZ columns, secret_hash, block numbers, and chain columns"
+      `${ORDERS_TABLE} table ensured with TIMESTAMPTZ columns, secret_hash, block numbers, and chain columns`
     );
   } catch (err: any) {
     console.error(`Failed to ensure ${ORDERS_TABLE} table:`, err.message);
