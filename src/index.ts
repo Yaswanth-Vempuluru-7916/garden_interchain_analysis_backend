@@ -18,8 +18,6 @@ async function testDbConnection() {
   try {
     client = await analysisPool.connect();
     console.log("Database connection successful");
-    const res = await client.query("SELECT NOW()");
-    console.log("Test query result:", res.rows[0]);
   } catch (err: any) {
     console.error(`Database connection failed: ${err.message}\nStack: ${err.stack}`);
     process.exit(1);
@@ -28,12 +26,17 @@ async function testDbConnection() {
   }
 }
 
-//Schedule syncOrders and updateTimestamps to run every 2 hours
+let isRunning = false;
+
 const scheduleSyncAndUpdate = () => {
   cron.schedule("0 */2 * * *", async () => {
+    if (isRunning) {
+      console.log("Previous job still running, skipping this run...");
+      return;
+    }
+    isRunning = true;
     console.log("Running scheduled sync and timestamp update...");
     try {
-      // Run syncOrders first
       await syncOrders(
         { body: {} } as any,
         {
@@ -42,7 +45,6 @@ const scheduleSyncAndUpdate = () => {
         } as any
       );
       console.log("Sync completed, proceeding to update timestamps...");
-      // Run updateTimestamps after sync completes
       await updateTimestamps(
         { body: {} } as any,
         {
@@ -53,6 +55,8 @@ const scheduleSyncAndUpdate = () => {
       console.log("Timestamp update completed.");
     } catch (err: any) {
       console.error("Error during scheduled sync/update:", err.message);
+    } finally {
+      isRunning = false;
     }
   });
   console.log("Cron job scheduled to run sync and updateTimestamps every 2 hours.");
@@ -65,7 +69,7 @@ testDbConnection()
       .then(() => {
         app.use("/", routes);
         //Start cron job after server initialization
-        // scheduleSyncAndUpdate();
+        scheduleSyncAndUpdate();
         app.listen(port, () => {
           console.log(`Backend running on http://localhost:${port}`);
         });
