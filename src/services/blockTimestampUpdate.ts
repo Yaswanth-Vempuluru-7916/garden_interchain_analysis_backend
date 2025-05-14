@@ -30,8 +30,8 @@ if (missingEnvVars.length > 0) {
 }
 
 const alchemyInstances = {
-  ethereum_sepolia: new Alchemy({ apiKey: process.env.ALCHEMY_TOKEN, network: Network.ETH_SEPOLIA }),
-  base_sepolia: new Alchemy({ apiKey: process.env.ALCHEMY_TOKEN, network: Network.BASE_SEPOLIA }),
+  ethereum_sepolia: new Alchemy({ apiKey: process.env.ALCHEMY_TOKEN, network: Network.ETH_MAINNET }),
+  base_sepolia: new Alchemy({ apiKey: process.env.ALCHEMY_TOKEN, network: Network.BASE_MAINNET }),
   bera_testnet: new Alchemy({
     apiKey: process.env.ALCHEMY_TOKEN,
     url: `${process.env.RPC_URL_BERA}/${process.env.ALCHEMY_TOKEN}`,

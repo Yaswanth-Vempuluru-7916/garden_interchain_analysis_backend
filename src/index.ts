@@ -65,7 +65,7 @@ testDbConnection()
       .then(() => {
         app.use("/", routes);
         //Start cron job after server initialization
-        scheduleSyncAndUpdate();
+        // scheduleSyncAndUpdate();
         app.listen(port, () => {
           console.log(`Backend running on http://localhost:${port}`);
         });
