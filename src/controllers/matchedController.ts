@@ -1,5 +1,5 @@
 import { Request, Response, RequestHandler } from "express";
-import { analysisPool } from "../config/db";
+import {mainPool, analysisPool } from "../config/db";
 let gardenfiValues: any;
 (async () => {
   gardenfiValues = await import("@gardenfi/orderbook");
@@ -41,9 +41,9 @@ export const getPaginatedMatchedOrders: RequestHandler = async (req: Request, re
       LIMIT $1 OFFSET $2
     `;
 
-    const dataResult = await analysisPool.query(dataQuery, [perPage, offset]);
+    const dataResult = await mainPool.query(dataQuery, [perPage, offset]);
 
-    const countResult = await analysisPool.query("SELECT COUNT(*) FROM matched_orders");
+    const countResult = await mainPool.query("SELECT COUNT(*) FROM matched_orders");
     const totalItems = parseInt(countResult.rows[0].count);
     const totalPages = Math.ceil(totalItems / perPage);
 
