@@ -1,8 +1,19 @@
 import { Request, Response, RequestHandler } from "express";
 import { analysisPool } from "../config/db";
-import { CreateOrder, MatchedOrder, PaginatedData, Swap } from "@gardenfi/orderbook";
+let gardenfiValues: any;
+(async () => {
+  gardenfiValues = await import("@gardenfi/orderbook");
+})();
 
 export const getPaginatedMatchedOrders: RequestHandler = async (req: Request, res: Response) => {
+  if (!gardenfiValues) {
+    res.status(500).json({ error: "Failed to load orderbook module" });
+    return;
+  }
+  type MatchedOrder = typeof gardenfiValues.MatchedOrder;
+  type Swap = typeof gardenfiValues.Swap;
+  type CreateOrder = typeof gardenfiValues.CreateOrder;
+  type PaginatedData<T> = typeof gardenfiValues.PaginatedData & { data: T[]; page: number; total_pages: number; total_items: number; per_page: number };
   const page = parseInt(req.query.page as string) || 1;
   const perPage = parseInt(req.query.per_page as string) || 10;
   const offset = (page - 1) * perPage;
