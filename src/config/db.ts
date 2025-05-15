@@ -3,7 +3,7 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-export const stagePool = new Pool({
+export const mainPool = new Pool({
   user: process.env.MAIN_DB_USER,
   host: process.env.MAIN_DB_HOST,
   database: process.env.MAIN_DB_NAME,
@@ -29,4 +29,4 @@ export const supportedChains = [
   "bera",
 ];
 
-export const ORDERS_TABLE = "orders_analysis"
+export const ORDERS_TABLE = "orders_3"
