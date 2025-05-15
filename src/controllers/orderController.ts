@@ -2,7 +2,6 @@ import { Request, Response, NextFunction } from "express";
 import { TimeframeRequestBody } from "../types";
 import { supportedChains } from "../config/db";
 import { analysisPool , ORDERS_TABLE} from "../config/db";
-import { matchedOrders } from "../services/matchedOrderService";
 
 const ANOMALY_THRESHOLD = 1.5 * 3600; // 5400 seconds
 
@@ -346,32 +345,5 @@ export const getAnomalyOrders = async (
   } catch (err: any) {
     console.error("Error fetching anomalous orders:", err.message);
     res.status(500).json({ error: "Database query failed" });
-  }
-};
-
-export const getMatchedOrders = async (
-  req: Request<{}, {}, { created_at: string }>,
-  res: Response,
-  next: NextFunction
-): Promise<void> => {
-  try {
-    const { created_at } = req.body;
-
-    if (!created_at || isNaN(Date.parse(created_at))) {
-      res.status(400).json({ error: "Valid created_at date is required" });
-      return;
-    }
-
-    const orders = await matchedOrders(created_at);
-
-    if (!orders || orders.length === 0) {
-      res.status(404).json({ message: "No matched orders found for the given date" });
-      return;
-    }
-
-    res.status(200).json(orders);
-  } catch (err: any) {
-    console.error("Error fetching matched orders:", err.message);
-    res.status(500).json({ error: "Internal server error" });
   }
 };
