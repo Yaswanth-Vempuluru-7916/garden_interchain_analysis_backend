@@ -29,4 +29,4 @@ export const supportedChains = [
   "bera",
 ];
 
-export const ORDERS_TABLE = "orders_3"
+export const ORDERS_TABLE = "final_orders"
