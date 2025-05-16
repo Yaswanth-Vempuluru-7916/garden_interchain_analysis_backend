@@ -29,7 +29,7 @@ async function testDbConnection() {
 let isRunning = false;
 
 const scheduleSyncAndUpdate = () => {
-  cron.schedule("0 */2 * * *", async () => {
+  cron.schedule("0 0,12 * * *", async () => {
     if (isRunning) {
       console.log("Previous job still running, skipping this run...");
       return;
@@ -59,7 +59,7 @@ const scheduleSyncAndUpdate = () => {
       isRunning = false;
     }
   });
-  console.log("Cron job scheduled to run sync and updateTimestamps every 2 hours.");
+  console.log("Cron job scheduled to run sync and updateTimestamps every 12 hours.");
 };
 
 const port = process.env.PORT || 3000;
@@ -68,8 +68,8 @@ testDbConnection()
     initTable()
       .then(() => {
         app.use("/", routes);
-        //Start cron job after server initialization
-        // scheduleSyncAndUpdate();
+        // Start cron job after server initialization
+        scheduleSyncAndUpdate();
         app.listen(port, () => {
           console.log(`Backend running on http://localhost:${port}`);
         });
