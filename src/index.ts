@@ -57,9 +57,6 @@ const scheduleSyncAndUpdate = () => {
   }, { timezone: "UTC" });
   console.log(`Cron job scheduled to run sync and updateTimestamps every 12 hours in UTC.`);
 
-    // Run immediately on start
-    console.log(`Running sync and update immediately on server start...`);
-    runSyncAndUpdate();
 
 };
 
