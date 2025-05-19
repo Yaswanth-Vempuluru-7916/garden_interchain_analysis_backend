@@ -23,7 +23,8 @@ export const getChainCombinationAverages = async (
   }
 
   const query = `
-    WITH durations AS (
+    -- Materialized CTE for durations
+    WITH durations AS MATERIALIZED (
       SELECT
         source_chain,
         destination_chain,
@@ -44,20 +45,224 @@ export const getChainCombinationAverages = async (
         AND source_chain = ANY($3)
         AND destination_chain = ANY($4)
     ),
-    stats AS (
+    counts AS MATERIALIZED (
       SELECT
         source_chain,
         destination_chain,
-        PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY user_init_duration) AS q1_user_init_duration,
-        PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY user_init_duration) AS q3_user_init_duration,
-        PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY cobi_init_duration) AS q1_cobi_init_duration,
-        PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY cobi_init_duration) AS q3_cobi_init_duration,
-        PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY user_redeem_duration) AS q1_user_redeem_duration,
-        PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY user_redeem_duration) AS q3_user_redeem_duration,
-        PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY cobi_redeem_duration) AS q1_cobi_redeem_duration,
-        PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY cobi_redeem_duration) AS q3_cobi_redeem_duration
+        COUNT(user_init_duration) AS user_init_count,
+        COUNT(cobi_init_duration) AS cobi_init_count,
+        COUNT(user_redeem_duration) AS user_redeem_count,
+        COUNT(cobi_redeem_duration) AS cobi_redeem_count
       FROM durations
       GROUP BY source_chain, destination_chain
+    ),
+    ordered_durations AS MATERIALIZED (
+      SELECT
+        source_chain,
+        destination_chain,
+        user_init_duration,
+        cobi_init_duration,
+        user_redeem_duration,
+        cobi_redeem_duration,
+        ROW_NUMBER() OVER (PARTITION BY source_chain, destination_chain ORDER BY user_init_duration) AS user_init_rn,
+        ROW_NUMBER() OVER (PARTITION BY source_chain, destination_chain ORDER BY cobi_init_duration) AS cobi_init_rn,
+        ROW_NUMBER() OVER (PARTITION BY source_chain, destination_chain ORDER BY user_redeem_duration) AS user_redeem_rn,
+        ROW_NUMBER() OVER (PARTITION BY source_chain, destination_chain ORDER BY cobi_redeem_duration) AS cobi_redeem_rn
+      FROM durations
+      WHERE user_init_duration IS NOT NULL
+        OR cobi_init_duration IS NOT NULL
+        OR user_redeem_duration IS NOT NULL
+        OR cobi_redeem_duration IS NOT NULL
+    ),
+    stats AS MATERIALIZED (
+      SELECT
+        c.source_chain,
+        c.destination_chain,
+        (SELECT CASE
+           WHEN c.user_init_count > 0 THEN
+             COALESCE(
+               (SELECT user_init_duration 
+                FROM ordered_durations od 
+                WHERE od.source_chain = c.source_chain 
+                AND od.destination_chain = c.destination_chain 
+                AND od.user_init_rn = FLOOR(0.25 * (c.user_init_count + 1))),
+               ((CEIL(0.25 * (c.user_init_count + 1)) - (0.25 * (c.user_init_count + 1))) * 
+                (SELECT user_init_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.user_init_rn = GREATEST(FLOOR(0.25 * (c.user_init_count + 1)), 1)) +
+                ((0.25 * (c.user_init_count + 1)) - FLOOR(0.25 * (c.user_init_count + 1))) * 
+                (SELECT user_init_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.user_init_rn = GREATEST(CEIL(0.25 * (c.user_init_count + 1)), 1)))
+             )
+           ELSE NULL
+         END) AS q1_user_init_duration,
+        (SELECT CASE
+           WHEN c.user_init_count > 0 THEN
+             COALESCE(
+               (SELECT user_init_duration 
+                FROM ordered_durations od 
+                WHERE od.source_chain = c.source_chain 
+                AND od.destination_chain = c.destination_chain 
+                AND od.user_init_rn = FLOOR(0.75 * (c.user_init_count + 1))),
+               ((CEIL(0.75 * (c.user_init_count + 1)) - (0.75 * (c.user_init_count + 1))) * 
+                (SELECT user_init_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.user_init_rn = GREATEST(FLOOR(0.75 * (c.user_init_count + 1)), 1)) +
+                ((0.75 * (c.user_init_count + 1)) - FLOOR(0.75 * (c.user_init_count + 1))) * 
+                (SELECT user_init_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.user_init_rn = GREATEST(CEIL(0.75 * (c.user_init_count + 1)), 1)))
+             )
+           ELSE NULL
+         END) AS q3_user_init_duration,
+        (SELECT CASE
+           WHEN c.cobi_init_count > 0 THEN
+             COALESCE(
+               (SELECT cobi_init_duration 
+                FROM ordered_durations od 
+                WHERE od.source_chain = c.source_chain 
+                AND od.destination_chain = c.destination_chain 
+                AND od.cobi_init_rn = FLOOR(0.25 * (c.cobi_init_count + 1))),
+               ((CEIL(0.25 * (c.cobi_init_count + 1)) - (0.25 * (c.cobi_init_count + 1))) * 
+                (SELECT cobi_init_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.cobi_init_rn = GREATEST(FLOOR(0.25 * (c.cobi_init_count + 1)), 1)) +
+                ((0.25 * (c.cobi_init_count + 1)) - FLOOR(0.25 * (c.cobi_init_count + 1))) * 
+                (SELECT cobi_init_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.cobi_init_rn = GREATEST(CEIL(0.25 * (c.cobi_init_count + 1)), 1)))
+             )
+           ELSE NULL
+         END) AS q1_cobi_init_duration,
+        (SELECT CASE
+           WHEN c.cobi_init_count > 0 THEN
+             COALESCE(
+               (SELECT cobi_init_duration 
+                FROM ordered_durations od 
+                WHERE od.source_chain = c.source_chain 
+                AND od.destination_chain = c.destination_chain 
+                AND od.cobi_init_rn = FLOOR(0.75 * (c.cobi_init_count + 1))),
+               ((CEIL(0.75 * (c.cobi_init_count + 1)) - (0.75 * (c.cobi_init_count + 1))) * 
+                (SELECT cobi_init_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.cobi_init_rn = GREATEST(FLOOR(0.75 * (c.cobi_init_count + 1)), 1)) +
+                ((0.75 * (c.cobi_init_count + 1)) - FLOOR(0.75 * (c.cobi_init_count + 1))) * 
+                (SELECT cobi_init_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.cobi_init_rn = GREATEST(CEIL(0.75 * (c.cobi_init_count + 1)), 1)))
+             )
+           ELSE NULL
+         END) AS q3_cobi_init_duration,
+        (SELECT CASE
+           WHEN c.user_redeem_count > 0 THEN
+             COALESCE(
+               (SELECT user_redeem_duration 
+                FROM ordered_durations od 
+                WHERE od.source_chain = c.source_chain 
+                AND od.destination_chain = c.destination_chain 
+                AND od.user_redeem_rn = FLOOR(0.25 * (c.user_redeem_count + 1))),
+               ((CEIL(0.25 * (c.user_redeem_count + 1)) - (0.25 * (c.user_redeem_count + 1))) * 
+                (SELECT user_redeem_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.user_redeem_rn = GREATEST(FLOOR(0.25 * (c.user_redeem_count + 1)), 1)) +
+                ((0.25 * (c.user_redeem_count + 1)) - FLOOR(0.25 * (c.user_redeem_count + 1))) * 
+                (SELECT user_redeem_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.user_redeem_rn = GREATEST(CEIL(0.25 * (c.user_redeem_count + 1)), 1)))
+             )
+           ELSE NULL
+         END) AS q1_user_redeem_duration,
+        (SELECT CASE
+           WHEN c.user_redeem_count > 0 THEN
+             COALESCE(
+               (SELECT user_redeem_duration 
+                FROM ordered_durations od 
+                WHERE od.source_chain = c.source_chain 
+                AND od.destination_chain = c.destination_chain 
+                AND od.user_redeem_rn = FLOOR(0.75 * (c.user_redeem_count + 1))),
+               ((CEIL(0.75 * (c.user_redeem_count + 1)) - (0.75 * (c.user_redeem_count + 1))) * 
+                (SELECT user_redeem_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.user_redeem_rn = GREATEST(FLOOR(0.75 * (c.user_redeem_count + 1)), 1)) +
+                ((0.75 * (c.user_redeem_count + 1)) - FLOOR(0.75 * (c.user_redeem_count + 1))) * 
+                (SELECT user_redeem_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.user_redeem_rn = GREATEST(CEIL(0.75 * (c.user_redeem_count + 1)), 1)))
+             )
+           ELSE NULL
+         END) AS q3_user_redeem_duration,
+        (SELECT CASE
+           WHEN c.cobi_redeem_count > 0 THEN
+             COALESCE(
+               (SELECT cobi_redeem_duration 
+                FROM ordered_durations od 
+                WHERE od.source_chain = c.source_chain 
+                AND od.destination_chain = c.destination_chain 
+                AND od.cobi_redeem_rn = FLOOR(0.25 * (c.cobi_redeem_count + 1))),
+               ((CEIL(0.25 * (c.cobi_redeem_count + 1)) - (0.25 * (c.cobi_redeem_count + 1))) * 
+                (SELECT cobi_redeem_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.cobi_redeem_rn = GREATEST(FLOOR(0.25 * (c.cobi_redeem_count + 1)), 1)) +
+                ((0.25 * (c.cobi_redeem_count + 1)) - FLOOR(0.25 * (c.cobi_redeem_count + 1))) * 
+                (SELECT cobi_redeem_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.cobi_redeem_rn = GREATEST(CEIL(0.25 * (c.cobi_redeem_count + 1)), 1)))
+             )
+           ELSE NULL
+         END) AS q1_cobi_redeem_duration,
+        (SELECT CASE
+           WHEN c.cobi_redeem_count > 0 THEN
+             COALESCE(
+               (SELECT cobi_redeem_duration 
+                FROM ordered_durations od 
+                WHERE od.source_chain = c.source_chain 
+                AND od.destination_chain = c.destination_chain 
+                AND od.cobi_redeem_rn = FLOOR(0.75 * (c.cobi_redeem_count + 1))),
+               ((CEIL(0.75 * (c.cobi_redeem_count + 1)) - (0.75 * (c.cobi_redeem_count + 1))) * 
+                (SELECT cobi_redeem_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.cobi_redeem_rn = GREATEST(FLOOR(0.75 * (c.cobi_redeem_count + 1)), 1)) +
+                ((0.75 * (c.cobi_redeem_count + 1)) - FLOOR(0.75 * (c.cobi_redeem_count + 1))) * 
+                (SELECT cobi_redeem_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.cobi_redeem_rn = GREATEST(CEIL(0.75 * (c.cobi_redeem_count + 1)), 1)))
+             )
+           ELSE NULL
+         END) AS q3_cobi_redeem_duration
+      FROM counts c
     )
     SELECT
       o.source_chain,
@@ -100,7 +305,6 @@ export const getChainCombinationAverages = async (
       )
       AND o.source_chain = ANY($3)
       AND o.destination_chain = ANY($4)
-      -- Implementing IQR anomaly filtering per chain combination (only upper bound)
       AND (
         (o.user_init IS NULL OR GREATEST(EXTRACT(EPOCH FROM (o.user_init - o.created_at)), 0) <= 
           (s.q3_user_init_duration + 1.5 * (s.q3_user_init_duration - s.q1_user_init_duration)))
@@ -180,7 +384,7 @@ export const getChainCombinationAverages = async (
             ? parseFloat(row.q3_user_init_duration) + 1.5 * (parseFloat(row.q3_user_init_duration) - parseFloat(row.q1_user_init_duration))
             : null,
         },
-         cobi_init_duration: {
+        cobi_init_duration: {
           lower: row.q1_cobi_init_duration && row.q3_cobi_init_duration
             ? parseFloat(row.q1_cobi_init_duration) - 1.5 * (parseFloat(row.q3_cobi_init_duration) - parseFloat(row.q1_cobi_init_duration))
             : null,
@@ -254,14 +458,18 @@ export const getAllIndividualOrders = async (
   }
 
   const query = `
-    WITH durations AS (
+    WITH durations AS MATERIALIZED (
       SELECT
         source_chain,
         destination_chain,
+        create_order_id,
+        created_at,
         CASE WHEN user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_init - created_at)), 0) END AS user_init_duration,
         CASE WHEN cobi_init IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_init - user_init)), 0) END AS cobi_init_duration,
         CASE WHEN user_redeem IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_redeem - cobi_init)), 0) END AS user_redeem_duration,
-        CASE WHEN cobi_redeem IS NOT NULL AND cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_redeem - cobi_init)), 0) END AS cobi_redeem_duration
+        CASE WHEN cobi_redeem IS NOT NULL AND cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_redeem - cobi_init)), 0) END AS cobi_redeem_duration,
+        CASE WHEN user_refund IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_refund - user_init)), 0) END AS user_refund_duration,
+        CASE WHEN cobi_refund IS NOT NULL AND cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_refund - cobi_init)), 0) END AS cobi_refund_duration
       FROM ${ORDERS_TABLE}
       WHERE created_at BETWEEN $1 AND $2
         AND (
@@ -275,65 +483,257 @@ export const getAllIndividualOrders = async (
         AND source_chain = ANY($3)
         AND destination_chain = ANY($4)
     ),
-    stats AS (
+    counts AS MATERIALIZED (
       SELECT
         source_chain,
         destination_chain,
-        PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY user_init_duration) AS q1_user_init_duration,
-        PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY user_init_duration) AS q3_user_init_duration,
-        PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY cobi_init_duration) AS q1_cobi_init_duration,
-        PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY cobi_init_duration) AS q3_cobi_init_duration,
-        PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY user_redeem_duration) AS q1_user_redeem_duration,
-        PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY user_redeem_duration) AS q3_user_redeem_duration,
-        PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY cobi_redeem_duration) AS q1_cobi_redeem_duration,
-        PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY cobi_redeem_duration) AS q3_cobi_redeem_duration
+        COUNT(user_init_duration) AS user_init_count,
+        COUNT(cobi_init_duration) AS cobi_init_count,
+        COUNT(user_redeem_duration) AS user_redeem_count,
+        COUNT(cobi_redeem_duration) AS cobi_redeem_count
       FROM durations
       GROUP BY source_chain, destination_chain
+    ),
+    ordered_durations AS MATERIALIZED (
+      SELECT
+        source_chain,
+        destination_chain,
+        user_init_duration,
+        cobi_init_duration,
+        user_redeem_duration,
+        cobi_redeem_duration,
+        ROW_NUMBER() OVER (PARTITION BY source_chain, destination_chain ORDER BY user_init_duration) AS user_init_rn,
+        ROW_NUMBER() OVER (PARTITION BY source_chain, destination_chain ORDER BY cobi_init_duration) AS cobi_init_rn,
+        ROW_NUMBER() OVER (PARTITION BY source_chain, destination_chain ORDER BY user_redeem_duration) AS user_redeem_rn,
+        ROW_NUMBER() OVER (PARTITION BY source_chain, destination_chain ORDER BY cobi_redeem_duration) AS cobi_redeem_rn
+      FROM durations
+      WHERE user_init_duration IS NOT NULL
+        OR cobi_init_duration IS NOT NULL
+        OR user_redeem_duration IS NOT NULL
+        OR cobi_redeem_duration IS NOT NULL
+    ),
+    stats AS MATERIALIZED (
+      SELECT
+        c.source_chain,
+        c.destination_chain,
+        (SELECT CASE
+           WHEN c.user_init_count > 0 THEN
+             COALESCE(
+               (SELECT user_init_duration 
+                FROM ordered_durations od 
+                WHERE od.source_chain = c.source_chain 
+                AND od.destination_chain = c.destination_chain 
+                AND od.user_init_rn = FLOOR(0.25 * (c.user_init_count + 1))),
+               ((CEIL(0.25 * (c.user_init_count + 1)) - (0.25 * (c.user_init_count + 1))) * 
+                (SELECT user_init_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.user_init_rn = GREATEST(FLOOR(0.25 * (c.user_init_count + 1)), 1)) +
+                ((0.25 * (c.user_init_count + 1)) - FLOOR(0.25 * (c.user_init_count + 1))) * 
+                (SELECT user_init_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.user_init_rn = GREATEST(CEIL(0.25 * (c.user_init_count + 1)), 1)))
+             )
+           ELSE NULL
+         END) AS q1_user_init_duration,
+        (SELECT CASE
+           WHEN c.user_init_count > 0 THEN
+             COALESCE(
+               (SELECT user_init_duration 
+                FROM ordered_durations od 
+                WHERE od.source_chain = c.source_chain 
+                AND od.destination_chain = c.destination_chain 
+                AND od.user_init_rn = FLOOR(0.75 * (c.user_init_count + 1))),
+               ((CEIL(0.75 * (c.user_init_count + 1)) - (0.75 * (c.user_init_count + 1))) * 
+                (SELECT user_init_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.user_init_rn = GREATEST(FLOOR(0.75 * (c.user_init_count + 1)), 1)) +
+                ((0.75 * (c.user_init_count + 1)) - FLOOR(0.75 * (c.user_init_count + 1))) * 
+                (SELECT user_init_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.user_init_rn = GREATEST(CEIL(0.75 * (c.user_init_count + 1)), 1)))
+             )
+           ELSE NULL
+         END) AS q3_user_init_duration,
+        (SELECT CASE
+           WHEN c.cobi_init_count > 0 THEN
+             COALESCE(
+               (SELECT cobi_init_duration 
+                FROM ordered_durations od 
+                WHERE od.source_chain = c.source_chain 
+                AND od.destination_chain = c.destination_chain 
+                AND od.cobi_init_rn = FLOOR(0.25 * (c.cobi_init_count + 1))),
+               ((CEIL(0.25 * (c.cobi_init_count + 1)) - (0.25 * (c.cobi_init_count + 1))) * 
+                (SELECT cobi_init_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.cobi_init_rn = GREATEST(FLOOR(0.25 * (c.cobi_init_count + 1)), 1)) +
+                ((0.25 * (c.cobi_init_count + 1)) - FLOOR(0.25 * (c.cobi_init_count + 1))) * 
+                (SELECT cobi_init_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.cobi_init_rn = GREATEST(CEIL(0.25 * (c.cobi_init_count + 1)), 1)))
+             )
+           ELSE NULL
+         END) AS q1_cobi_init_duration,
+        (SELECT CASE
+           WHEN c.cobi_init_count > 0 THEN
+             COALESCE(
+               (SELECT cobi_init_duration 
+                FROM ordered_durations od 
+                WHERE od.source_chain = c.source_chain 
+                AND od.destination_chain = c.destination_chain 
+                AND od.cobi_init_rn = FLOOR(0.75 * (c.cobi_init_count + 1))),
+               ((CEIL(0.75 * (c.cobi_init_count + 1)) - (0.75 * (c.cobi_init_count + 1))) * 
+                (SELECT cobi_init_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.cobi_init_rn = GREATEST(FLOOR(0.75 * (c.cobi_init_count + 1)), 1)) +
+                ((0.75 * (c.cobi_init_count + 1)) - FLOOR(0.75 * (c.cobi_init_count + 1))) * 
+                (SELECT cobi_init_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.cobi_init_rn = GREATEST(CEIL(0.75 * (c.cobi_init_count + 1)), 1)))
+             )
+           ELSE NULL
+         END) AS q3_cobi_init_duration,
+        (SELECT CASE
+           WHEN c.user_redeem_count > 0 THEN
+             COALESCE(
+               (SELECT user_redeem_duration 
+                FROM ordered_durations od 
+                WHERE od.source_chain = c.source_chain 
+                AND od.destination_chain = c.destination_chain 
+                AND od.user_redeem_rn = FLOOR(0.25 * (c.user_redeem_count + 1))),
+               ((CEIL(0.25 * (c.user_redeem_count + 1)) - (0.25 * (c.user_redeem_count + 1))) * 
+                (SELECT user_redeem_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.user_redeem_rn = GREATEST(FLOOR(0.25 * (c.user_redeem_count + 1)), 1)) +
+                ((0.25 * (c.user_redeem_count + 1)) - FLOOR(0.25 * (c.user_redeem_count + 1))) * 
+                (SELECT user_redeem_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.user_redeem_rn = GREATEST(CEIL(0.25 * (c.user_redeem_count + 1)), 1)))
+             )
+           ELSE NULL
+         END) AS q1_user_redeem_duration,
+        (SELECT CASE
+           WHEN c.user_redeem_count > 0 THEN
+             COALESCE(
+               (SELECT user_redeem_duration 
+                FROM ordered_durations od 
+                WHERE od.source_chain = c.source_chain 
+                AND od.destination_chain = c.destination_chain 
+                AND od.user_redeem_rn = FLOOR(0.75 * (c.user_redeem_count + 1))),
+               ((CEIL(0.75 * (c.user_redeem_count + 1)) - (0.75 * (c.user_redeem_count + 1))) * 
+                (SELECT user_redeem_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.user_redeem_rn = GREATEST(FLOOR(0.75 * (c.user_redeem_count + 1)), 1)) +
+                ((0.75 * (c.user_redeem_count + 1)) - FLOOR(0.75 * (c.user_redeem_count + 1))) * 
+                (SELECT user_redeem_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.user_redeem_rn = GREATEST(CEIL(0.75 * (c.user_redeem_count + 1)), 1)))
+             )
+           ELSE NULL
+         END) AS q3_user_redeem_duration,
+        (SELECT CASE
+           WHEN c.cobi_redeem_count > 0 THEN
+             COALESCE(
+               (SELECT cobi_redeem_duration 
+                FROM ordered_durations od 
+                WHERE od.source_chain = c.source_chain 
+                AND od.destination_chain = c.destination_chain 
+                AND od.cobi_redeem_rn = FLOOR(0.25 * (c.cobi_redeem_count + 1))),
+               ((CEIL(0.25 * (c.cobi_redeem_count + 1)) - (0.25 * (c.cobi_redeem_count + 1))) * 
+                (SELECT cobi_redeem_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.cobi_redeem_rn = GREATEST(FLOOR(0.25 * (c.cobi_redeem_count + 1)), 1)) +
+                ((0.25 * (c.cobi_redeem_count + 1)) - FLOOR(0.25 * (c.cobi_redeem_count + 1))) * 
+                (SELECT cobi_redeem_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.cobi_redeem_rn = GREATEST(CEIL(0.25 * (c.cobi_redeem_count + 1)), 1)))
+             )
+           ELSE NULL
+         END) AS q1_cobi_redeem_duration,
+        (SELECT CASE
+           WHEN c.cobi_redeem_count > 0 THEN
+             COALESCE(
+               (SELECT cobi_redeem_duration 
+                FROM ordered_durations od 
+                WHERE od.source_chain = c.source_chain 
+                AND od.destination_chain = c.destination_chain 
+                AND od.cobi_redeem_rn = FLOOR(0.75 * (c.cobi_redeem_count + 1))),
+               ((CEIL(0.75 * (c.cobi_redeem_count + 1)) - (0.75 * (c.cobi_redeem_count + 1))) * 
+                (SELECT cobi_redeem_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.cobi_redeem_rn = GREATEST(FLOOR(0.75 * (c.cobi_redeem_count + 1)), 1)) +
+                ((0.75 * (c.cobi_redeem_count + 1)) - FLOOR(0.75 * (c.cobi_redeem_count + 1))) * 
+                (SELECT cobi_redeem_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.cobi_redeem_rn = GREATEST(CEIL(0.75 * (c.cobi_redeem_count + 1)), 1)))
+             )
+           ELSE NULL
+         END) AS q3_cobi_redeem_duration
+      FROM counts c
     )
     SELECT
-      o.source_chain,
-      o.destination_chain,
-      o.create_order_id,
-      o.created_at,
-      CASE WHEN o.user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (o.user_init - o.created_at)), 0) END AS user_init_duration,
-      CASE WHEN o.cobi_init IS NOT NULL AND o.user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (o.cobi_init - o.user_init)), 0) END AS cobi_init_duration,
-      CASE WHEN o.user_redeem IS NOT NULL AND o.user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (o.user_redeem - o.cobi_init)), 0) END AS user_redeem_duration,
-      CASE WHEN o.user_refund IS NOT NULL AND o.user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (o.user_refund - o.user_init)), 0) END AS user_refund_duration,
-      CASE WHEN o.cobi_redeem IS NOT NULL AND o.cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (o.cobi_redeem - o.cobi_init)), 0) END AS cobi_redeem_duration,
-      CASE WHEN o.cobi_refund IS NOT NULL AND o.cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (o.cobi_refund - o.cobi_init)), 0) END AS cobi_refund_duration,
+      d.source_chain,
+      d.destination_chain,
+      d.create_order_id,
+      d.created_at,
+      d.user_init_duration,
+      d.cobi_init_duration,
+      d.user_redeem_duration,
+      d.user_refund_duration,
+      d.cobi_redeem_duration,
+      d.cobi_refund_duration,
       (
-        COALESCE(CASE WHEN o.user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (o.user_init - o.created_at)), 0) END, 0) +
-        COALESCE(CASE WHEN o.cobi_init IS NOT NULL AND o.user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (o.cobi_init - o.user_init)), 0) END, 0) +
-        COALESCE(CASE WHEN o.user_redeem IS NOT NULL AND o.user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (o.user_redeem - o.cobi_init)), 0) END, 0) +
-        COALESCE(CASE WHEN o.user_refund IS NOT NULL AND o.user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (o.user_refund - o.user_init)), 0) END, 0) +
-        COALESCE(CASE WHEN o.cobi_redeem IS NOT NULL AND o.cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (o.cobi_redeem - o.cobi_init)), 0) END, 0) +
-        COALESCE(CASE WHEN o.cobi_refund IS NOT NULL AND o.cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (o.cobi_refund - o.cobi_init)), 0) END, 0)
+        COALESCE(d.user_init_duration, 0) +
+        COALESCE(d.cobi_init_duration, 0) +
+        COALESCE(d.user_redeem_duration, 0) +
+        COALESCE(d.user_refund_duration, 0) +
+        COALESCE(d.cobi_redeem_duration, 0) +
+        COALESCE(d.cobi_refund_duration, 0)
       ) AS overall_duration
-    FROM ${ORDERS_TABLE} o
-    JOIN stats s ON o.source_chain = s.source_chain AND o.destination_chain = s.destination_chain
-    WHERE o.created_at BETWEEN $1 AND $2
-      AND (
-        o.user_init IS NOT NULL OR
-        o.cobi_init IS NOT NULL OR
-        o.user_redeem IS NOT NULL OR
-        o.user_refund IS NOT NULL OR
-        o.cobi_redeem IS NOT NULL OR
-        o.cobi_refund IS NOT NULL
-      )
-      AND o.source_chain = ANY($3)
-      AND o.destination_chain = ANY($4)
-      -- Implementing IQR anomaly filtering to exclude anomalous orders (only upper bound)
-      AND (
-        (o.user_init IS NULL OR GREATEST(EXTRACT(EPOCH FROM (o.user_init - o.created_at)), 0) <= 
+    FROM durations d
+    JOIN stats s ON d.source_chain = s.source_chain AND d.destination_chain = s.destination_chain
+    WHERE (
+        (d.user_init_duration IS NULL OR d.user_init_duration <= 
           (s.q3_user_init_duration + 1.5 * (s.q3_user_init_duration - s.q1_user_init_duration)))
-        AND (o.cobi_init IS NULL OR o.user_init IS NULL OR GREATEST(EXTRACT(EPOCH FROM (o.cobi_init - o.user_init)), 0) <= 
+        AND (d.cobi_init_duration IS NULL OR d.cobi_init_duration <= 
           (s.q3_cobi_init_duration + 1.5 * (s.q3_cobi_init_duration - s.q1_cobi_init_duration)))
-        AND (o.user_redeem IS NULL OR o.user_init IS NULL OR GREATEST(EXTRACT(EPOCH FROM (o.user_redeem - o.cobi_init)), 0) <= 
+        AND (d.user_redeem_duration IS NULL OR d.user_redeem_duration <= 
           (s.q3_user_redeem_duration + 1.5 * (s.q3_user_redeem_duration - s.q1_user_redeem_duration)))
-        AND (o.cobi_redeem IS NULL OR o.cobi_init IS NULL OR GREATEST(EXTRACT(EPOCH FROM (o.cobi_redeem - o.cobi_init)), 0) <= 
+        AND (d.cobi_redeem_duration IS NULL OR d.cobi_redeem_duration <= 
           (s.q3_cobi_redeem_duration + 1.5 * (s.q3_cobi_redeem_duration - s.q1_cobi_redeem_duration)))
       )
-    ORDER BY o.source_chain, o.destination_chain, o.created_at ASC;
+    ORDER BY d.source_chain, d.destination_chain, d.created_at ASC;
   `;
 
   try {
@@ -399,15 +799,19 @@ export const getAnomalyOrders = async (
   }
 
   const query = `
-    WITH durations AS (
+    WITH durations AS MATERIALIZED (
       SELECT
         source_chain,
         destination_chain,
+        create_order_id,
+        created_at,
         CASE WHEN user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_init - created_at)), 0) END AS user_init_duration,
-        CASE WHEN cobi_init IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_init - o.user_init)), 0) END AS cobi_init_duration,
+        CASE WHEN cobi_init IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_init - user_init)), 0) END AS cobi_init_duration,
         CASE WHEN user_redeem IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_redeem - cobi_init)), 0) END AS user_redeem_duration,
-        CASE WHEN cobi_redeem IS NOT NULL AND cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_redeem - cobi_init)), 0) END AS cobi_redeem_duration
-      FROM ${ORDERS_TABLE} o
+        CASE WHEN cobi_redeem IS NOT NULL AND cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_redeem - cobi_init)), 0) END AS cobi_redeem_duration,
+        CASE WHEN user_refund IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_refund - user_init)), 0) END AS user_refund_duration,
+        CASE WHEN cobi_refund IS NOT NULL AND cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_refund - cobi_init)), 0) END AS cobi_refund_duration
+      FROM ${ORDERS_TABLE}
       WHERE created_at BETWEEN $1 AND $2
         AND (
           user_init IS NOT NULL OR
@@ -420,65 +824,265 @@ export const getAnomalyOrders = async (
         AND source_chain = ANY($3)
         AND destination_chain = ANY($4)
     ),
-    stats AS (
+    counts AS MATERIALIZED (
       SELECT
         source_chain,
         destination_chain,
-        PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY user_init_duration) AS q1_user_init_duration,
-        PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY user_init_duration) AS q3_user_init_duration,
-        PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY cobi_init_duration) AS q1_cobi_init_duration,
-        PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY cobi_init_duration) AS q3_cobi_init_duration,
-        PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY user_redeem_duration) AS q1_user_redeem_duration,
-        PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY user_redeem_duration) AS q3_user_redeem_duration,
-        PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY cobi_redeem_duration) AS q1_cobi_redeem_duration,
-        PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY cobi_redeem_duration) AS q3_cobi_redeem_duration
+        COUNT(user_init_duration) AS user_init_count,
+        COUNT(cobi_init_duration) AS cobi_init_count,
+        COUNT(user_redeem_duration) AS user_redeem_count,
+        COUNT(cobi_redeem_duration) AS cobi_redeem_count
       FROM durations
       GROUP BY source_chain, destination_chain
+    ),
+    ordered_durations AS MATERIALIZED (
+      SELECT
+        source_chain,
+        destination_chain,
+        user_init_duration,
+        cobi_init_duration,
+        user_redeem_duration,
+        cobi_redeem_duration,
+        ROW_NUMBER() OVER (PARTITION BY source_chain, destination_chain ORDER BY user_init_duration) AS user_init_rn,
+        ROW_NUMBER() OVER (PARTITION BY source_chain, destination_chain ORDER BY cobi_init_duration) AS cobi_init_rn,
+        ROW_NUMBER() OVER (PARTITION BY source_chain, destination_chain ORDER BY user_redeem_duration) AS user_redeem_rn,
+        ROW_NUMBER() OVER (PARTITION BY source_chain, destination_chain ORDER BY cobi_redeem_duration) AS cobi_redeem_rn
+      FROM durations
+      WHERE user_init_duration IS NOT NULL
+        OR cobi_init_duration IS NOT NULL
+        OR user_redeem_duration IS NOT NULL
+        OR cobi_redeem_duration IS NOT NULL
+    ),
+    stats AS MATERIALIZED (
+      SELECT
+        c.source_chain,
+        c.destination_chain,
+        (SELECT CASE
+           WHEN c.user_init_count > 0 THEN
+             COALESCE(
+               (SELECT user_init_duration 
+                FROM ordered_durations od 
+                WHERE od.source_chain = c.source_chain 
+                AND od.destination_chain = c.destination_chain 
+                AND od.user_init_rn = FLOOR(0.25 * (c.user_init_count + 1))),
+               ((CEIL(0.25 * (c.user_init_count + 1)) - (0.25 * (c.user_init_count + 1))) * 
+                (SELECT user_init_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.user_init_rn = GREATEST(FLOOR(0.25 * (c.user_init_count + 1)), 1)) +
+                ((0.25 * (c.user_init_count + 1)) - FLOOR(0.25 * (c.user_init_count + 1))) * 
+                (SELECT user_init_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.user_init_rn = GREATEST(CEIL(0.25 * (c.user_init_count + 1)), 1)))
+             )
+           ELSE NULL
+         END) AS q1_user_init_duration,
+        (SELECT CASE
+           WHEN c.user_init_count > 0 THEN
+             COALESCE(
+               (SELECT user_init_duration 
+                FROM ordered_durations od 
+                WHERE od.source_chain = c.source_chain 
+                AND od.destination_chain = c.destination_chain 
+                AND od.user_init_rn = FLOOR(0.75 * (c.user_init_count + 1))),
+               ((CEIL(0.75 * (c.user_init_count + 1)) - (0.75 * (c.user_init_count + 1))) * 
+                (SELECT user_init_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.user_init_rn = GREATEST(FLOOR(0.75 * (c.user_init_count + 1)), 1)) +
+                ((0.75 * (c.user_init_count + 1)) - FLOOR(0.75 * (c.user_init_count + 1))) * 
+                (SELECT user_init_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.user_init_rn = GREATEST(CEIL(0.75 * (c.user_init_count + 1)), 1)))
+             )
+           ELSE NULL
+         END) AS q3_user_init_duration,
+        (SELECT CASE
+           WHEN c.cobi_init_count > 0 THEN
+             COALESCE(
+               (SELECT cobi_init_duration 
+                FROM ordered_durations od 
+                WHERE od.source_chain = c.source_chain 
+                AND od.destination_chain = c.destination_chain 
+                AND od.cobi_init_rn = FLOOR(0.25 * (c.cobi_init_count + 1))),
+               ((CEIL(0.25 * (c.cobi_init_count + 1)) - (0.25 * (c.cobi_init_count + 1))) * 
+                (SELECT cobi_init_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.cobi_init_rn = GREATEST(FLOOR(0.25 * (c.cobi_init_count + 1)), 1)) +
+                ((0.25 * (c.cobi_init_count + 1)) - FLOOR(0.25 * (c.cobi_init_count + 1))) * 
+                (SELECT cobi_init_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.cobi_init_rn = GREATEST(CEIL(0.25 * (c.cobi_init_count + 1)), 1)))
+             )
+           ELSE NULL
+         END) AS q1_cobi_init_duration,
+        (SELECT CASE
+           WHEN c.cobi_init_count > 0 THEN
+             COALESCE(
+               (SELECT cobi_init_duration 
+                FROM ordered_durations od 
+                WHERE od.source_chain = c.source_chain 
+                AND od.destination_chain = c.destination_chain 
+                AND od.cobi_init_rn = FLOOR(0.75 * (c.cobi_init_count + 1))),
+               ((CEIL(0.75 * (c.cobi_init_count + 1)) - (0.75 * (c.cobi_init_count + 1))) * 
+                (SELECT cobi_init_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.cobi_init_rn = GREATEST(FLOOR(0.75 * (c.cobi_init_count + 1)), 1)) +
+                ((0.75 * (c.cobi_init_count + 1)) - FLOOR(0.75 * (c.cobi_init_count + 1))) * 
+                (SELECT cobi_init_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.cobi_init_rn = GREATEST(CEIL(0.75 * (c.cobi_init_count + 1)), 1)))
+             )
+           ELSE NULL
+         END) AS q3_cobi_init_duration,
+        (SELECT CASE
+           WHEN c.user_redeem_count > 0 THEN
+             COALESCE(
+               (SELECT user_redeem_duration 
+                FROM ordered_durations od 
+                WHERE od.source_chain = c.source_chain 
+                AND od.destination_chain = c.destination_chain 
+                AND od.user_redeem_rn = FLOOR(0.25 * (c.user_redeem_count + 1))),
+               ((CEIL(0.25 * (c.user_redeem_count + 1)) - (0.25 * (c.user_redeem_count + 1))) * 
+                (SELECT user_redeem_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.user_redeem_rn = GREATEST(FLOOR(0.25 * (c.user_redeem_count + 1)), 1)) +
+                ((0.25 * (c.user_redeem_count + 1)) - FLOOR(0.25 * (c.user_redeem_count + 1))) * 
+                (SELECT user_redeem_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.user_redeem_rn = GREATEST(CEIL(0.25 * (c.user_redeem_count + 1)), 1)))
+             )
+           ELSE NULL
+         END) AS q1_user_redeem_duration,
+        (SELECT CASE
+           WHEN c.user_redeem_count > 0 THEN
+             COALESCE(
+               (SELECT user_redeem_duration 
+                FROM ordered_durations od 
+                WHERE od.source_chain = c.source_chain 
+                AND od.destination_chain = c.destination_chain 
+                AND od.user_redeem_rn = FLOOR(0.75 * (c.user_redeem_count + 1))),
+               ((CEIL(0.75 * (c.user_redeem_count + 1)) - (0.75 * (c.user_redeem_count + 1))) * 
+                (SELECT user_redeem_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.user_redeem_rn = GREATEST(FLOOR(0.75 * (c.user_redeem_count + 1)), 1)) +
+                ((0.75 * (c.user_redeem_count + 1)) - FLOOR(0.75 * (c.user_redeem_count + 1))) * 
+                (SELECT user_redeem_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.user_redeem_rn = GREATEST(CEIL(0.75 * (c.user_redeem_count + 1)), 1)))
+             )
+           ELSE NULL
+         END) AS q3_user_redeem_duration,
+        (SELECT CASE
+           WHEN c.cobi_redeem_count > 0 THEN
+             COALESCE(
+               (SELECT cobi_redeem_duration 
+                FROM ordered_durations od 
+                WHERE od.source_chain = c.source_chain 
+                AND od.destination_chain = c.destination_chain 
+                AND od.cobi_redeem_rn = FLOOR(0.25 * (c.cobi_redeem_count + 1))),
+               ((CEIL(0.25 * (c.cobi_redeem_count + 1)) - (0.25 * (c.cobi_redeem_count + 1))) * 
+                (SELECT cobi_redeem_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.cobi_redeem_rn = GREATEST(FLOOR(0.25 * (c.cobi_redeem_count + 1)), 1)) +
+                ((0.25 * (c.cobi_redeem_count + 1)) - FLOOR(0.25 * (c.cobi_redeem_count + 1))) * 
+                (SELECT cobi_redeem_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.cobi_redeem_rn = GREATEST(CEIL(0.25 * (c.cobi_redeem_count + 1)), 1)))
+             )
+           ELSE NULL
+         END) AS q1_cobi_redeem_duration,
+        (SELECT CASE
+           WHEN c.cobi_redeem_count > 0 THEN
+             COALESCE(
+               (SELECT cobi_redeem_duration 
+                FROM ordered_durations od 
+                WHERE od.source_chain = c.source_chain 
+                AND od.destination_chain = c.destination_chain 
+                AND od.cobi_redeem_rn = FLOOR(0.75 * (c.cobi_redeem_count + 1))),
+               ((CEIL(0.75 * (c.cobi_redeem_count + 1)) - (0.75 * (c.cobi_redeem_count + 1))) * 
+                (SELECT cobi_redeem_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.cobi_redeem_rn = GREATEST(FLOOR(0.75 * (c.cobi_redeem_count + 1)), 1)) +
+                ((0.75 * (c.cobi_redeem_count + 1)) - FLOOR(0.75 * (c.cobi_redeem_count + 1))) * 
+                (SELECT cobi_redeem_duration 
+                 FROM ordered_durations od 
+                 WHERE od.source_chain = c.source_chain 
+                 AND od.destination_chain = c.destination_chain 
+                 AND od.cobi_redeem_rn = GREATEST(CEIL(0.75 * (c.cobi_redeem_count + 1)), 1)))
+             )
+           ELSE NULL
+         END) AS q3_cobi_redeem_duration
+      FROM counts c
     )
     SELECT
-      o.source_chain,
-      o.destination_chain,
-      o.create_order_id,
-      o.created_at,
-      CASE WHEN o.user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (o.user_init - o.created_at)), 0) END AS user_init_duration,
-      CASE WHEN o.cobi_init IS NOT NULL AND o.user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (o.cobi_init - o.user_init)), 0) END AS cobi_init_duration,
-      CASE WHEN o.user_redeem IS NOT NULL AND o.user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (o.user_redeem - o.cobi_init)), 0) END AS user_redeem_duration,
-      CASE WHEN o.user_refund IS NOT NULL AND o.user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (o.user_refund - o.user_init)), 0) END AS user_refund_duration,
-      CASE WHEN o.cobi_redeem IS NOT NULL AND o.cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (o.cobi_redeem - o.cobi_init)), 0) END AS cobi_redeem_duration,
-      CASE WHEN o.cobi_refund IS NOT NULL AND o.cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (o.cobi_refund - o.cobi_init)), 0) END AS cobi_refund_duration,
+      d.source_chain,
+      d.destination_chain,
+      d.create_order_id,
+      d.created_at,
+      d.user_init_duration,
+      d.cobi_init_duration,
+      d.user_redeem_duration,
+      d.user_refund_duration,
+      d.cobi_redeem_duration,
+      d.cobi_refund_duration,
       (
-        COALESCE(CASE WHEN o.user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (o.user_init - o.created_at)), 0) END, 0) +
-        COALESCE(CASE WHEN o.cobi_init IS NOT NULL AND o.user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (o.cobi_init - o.user_init)), 0) END, 0) +
-        COALESCE(CASE WHEN o.user_redeem IS NOT NULL AND o.user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (o.user_redeem - o.cobi_init)), 0) END, 0) +
-        COALESCE(CASE WHEN o.user_refund IS NOT NULL AND o.user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (o.user_refund - o.user_init)), 0) END, 0) +
-        COALESCE(CASE WHEN o.cobi_redeem IS NOT NULL AND o.cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (o.cobi_redeem - o.cobi_init)), 0) END, 0) +
-        COALESCE(CASE WHEN o.cobi_refund IS NOT NULL AND o.cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (o.cobi_refund - o.cobi_init)), 0) END, 0)
-      ) AS overall_duration
-    FROM ${ORDERS_TABLE} o
-    JOIN stats s ON o.source_chain = s.source_chain AND o.destination_chain = s.destination_chain
-    WHERE o.created_at BETWEEN $1 AND $2
-      AND (
-        o.user_init IS NOT NULL OR
-        o.cobi_init IS NOT NULL OR
-        o.user_redeem IS NOT NULL OR
-        o.user_refund IS NOT NULL OR
-        o.cobi_redeem IS NOT NULL OR
-        o.cobi_refund IS NOT NULL
-      )
-      AND o.source_chain = ANY($3)
-      AND o.destination_chain = ANY($4)
-      -- Implementing IQR anomaly detection (only upper bound)
-      AND (
-        (o.user_init IS NOT NULL AND GREATEST(EXTRACT(EPOCH FROM (o.user_init - o.created_at)), 0) > 
+        COALESCE(d.user_init_duration, 0) +
+        COALESCE(d.cobi_init_duration, 0) +
+        COALESCE(d.user_redeem_duration, 0) +
+        COALESCE(d.user_refund_duration, 0) +
+        COALESCE(d.cobi_redeem_duration, 0) +
+        COALESCE(d.cobi_refund_duration, 0)
+      ) AS overall_duration,
+      s.q1_user_init_duration,
+      s.q3_user_init_duration,
+      s.q1_cobi_init_duration,
+      s.q3_cobi_init_duration,
+      s.q1_user_redeem_duration,
+      s.q3_user_redeem_duration,
+      s.q1_cobi_redeem_duration,
+      s.q3_cobi_redeem_duration
+    FROM durations d
+    JOIN stats s ON d.source_chain = s.source_chain AND d.destination_chain = s.destination_chain
+    WHERE (
+        (d.user_init_duration IS NOT NULL AND d.user_init_duration > 
           (s.q3_user_init_duration + 1.5 * (s.q3_user_init_duration - s.q1_user_init_duration)))
-        OR (o.cobi_init IS NOT NULL AND o.user_init IS NOT NULL AND GREATEST(EXTRACT(EPOCH FROM (o.cobi_init - o.user_init)), 0) > 
+        OR (d.cobi_init_duration IS NOT NULL AND d.cobi_init_duration > 
           (s.q3_cobi_init_duration + 1.5 * (s.q3_cobi_init_duration - s.q1_cobi_init_duration)))
-        OR (o.user_redeem IS NOT NULL AND o.user_init IS NOT NULL AND GREATEST(EXTRACT(EPOCH FROM (o.user_redeem - o.cobi_init)), 0) > 
+        OR (d.user_redeem_duration IS NOT NULL AND d.user_redeem_duration > 
           (s.q3_user_redeem_duration + 1.5 * (s.q3_user_redeem_duration - s.q1_user_redeem_duration)))
-        OR (o.cobi_redeem IS NOT NULL AND o.cobi_init IS NOT NULL AND GREATEST(EXTRACT(EPOCH FROM (o.cobi_redeem - o.cobi_init)), 0) > 
+        OR (d.cobi_redeem_duration IS NOT NULL AND d.cobi_redeem_duration > 
           (s.q3_cobi_redeem_duration + 1.5 * (s.q3_cobi_redeem_duration - s.q1_cobi_redeem_duration)))
       )
-    ORDER BY o.source_chain, o.destination_chain, o.created_at ASC;
+    ORDER BY d.source_chain, d.destination_chain, d.created_at ASC;
   `;
 
   try {
@@ -490,7 +1094,7 @@ export const getAnomalyOrders = async (
     ]);
 
     if (result.rows.length === 0) {
-      res.status(404).json({ error: "No anomalous orders found in the given range (using IQR)" });
+      res.status(404).json({ error: "No anomalous orders found with timestamps in the given range (using IQR)" });
       return;
     }
 
@@ -511,12 +1115,46 @@ export const getAnomalyOrders = async (
           cobi_refund_duration: order.cobi_refund_duration ? parseFloat(order.cobi_refund_duration) : null,
           overall_duration: order.overall_duration ? parseFloat(order.overall_duration) : null,
         },
+        thresholds: {
+          user_init_duration: {
+            lower: order.q1_user_init_duration && order.q3_user_init_duration
+              ? parseFloat(order.q1_user_init_duration) - 1.5 * (parseFloat(order.q3_user_init_duration) - parseFloat(order.q1_user_init_duration))
+              : null,
+            upper: order.q1_user_init_duration && order.q3_user_init_duration
+              ? parseFloat(order.q3_user_init_duration) + 1.5 * (parseFloat(order.q3_user_init_duration) - parseFloat(order.q1_user_init_duration))
+              : null,
+          },
+          cobi_init_duration: {
+            lower: order.q1_cobi_init_duration && order.q3_cobi_init_duration
+              ? parseFloat(order.q1_cobi_init_duration) - 1.5 * (parseFloat(order.q3_cobi_init_duration) - parseFloat(order.q1_cobi_init_duration))
+              : null,
+            upper: order.q1_cobi_init_duration && order.q3_cobi_init_duration
+              ? parseFloat(order.q3_cobi_init_duration) + 1.5 * (parseFloat(order.q3_cobi_init_duration) - parseFloat(order.q1_cobi_init_duration))
+              : null,
+          },
+          user_redeem_duration: {
+            lower: order.q1_user_redeem_duration && order.q3_user_redeem_duration
+              ? parseFloat(order.q1_user_redeem_duration) - 1.5 * (parseFloat(order.q3_user_redeem_duration) - parseFloat(order.q1_user_redeem_duration))
+              : null,
+            upper: order.q1_user_redeem_duration && order.q3_user_redeem_duration
+              ? parseFloat(order.q3_user_redeem_duration) + 1.5 * (parseFloat(order.q3_user_redeem_duration) - parseFloat(order.q1_user_redeem_duration))
+              : null,
+          },
+          cobi_redeem_duration: {
+            lower: order.q1_cobi_redeem_duration && order.q3_cobi_redeem_duration
+              ? parseFloat(order.q1_cobi_redeem_duration) - 1.5 * (parseFloat(order.q3_cobi_redeem_duration) - parseFloat(order.q1_cobi_redeem_duration))
+              : null,
+            upper: order.q1_cobi_redeem_duration && order.q3_cobi_redeem_duration
+              ? parseFloat(order.q3_cobi_redeem_duration) + 1.5 * (parseFloat(order.q3_cobi_redeem_duration) - parseFloat(order.q1_cobi_redeem_duration))
+              : null,
+          },
+        },
       });
       return acc;
     }, {});
 
     res.json({
-      message: "Anomalous order durations for all chain combinations (in seconds, using IQR)",
+      message: "Anomalous individual order durations for all chain combinations (in seconds, using IQR)",
       orders: ordersByChain,
     });
   } catch (err: any) {
