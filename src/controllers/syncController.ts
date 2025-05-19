@@ -1,20 +1,19 @@
+// syncController.ts (unchanged, included for reference)
 import { Request, Response } from "express";
 import { analysisPool, ORDERS_TABLE } from "../config/db";
 import { initTable, populateOrderAnalysis } from "../services/dbService";
 import { updateTimestampsForOrders } from "../services/blockTimestampUpdate";
 
-export const syncOrders = async (req: Request, res: Response): Promise<void> => {
+export const performOrderSync = async (): Promise<void> => {
   try {
     await initTable();
     await populateOrderAnalysis();
-    res.status(200).json({ message: "Order sync completed successfully" });
   } catch (err: any) {
-    console.error("Error during order sync:", err.message);
-    res.status(500).json({ error: "Order sync failed" });
+    throw new Error(`Order sync failed: ${err.message}`);
   }
 };
 
-export const updateTimestamps = async (req: Request, res: Response): Promise<void> => {
+export const performTimestampUpdate = async (): Promise<void> => {
   try {
     const orderIdsQuery = `
       SELECT create_order_id
@@ -31,10 +30,27 @@ export const updateTimestamps = async (req: Request, res: Response): Promise<voi
     const orderIdsResult = await analysisPool.query(orderIdsQuery);
     const orderIds = orderIdsResult.rows.map((row) => row.create_order_id);
     await updateTimestampsForOrders(orderIds);
-    res.status(200).json({ message: "Timestamps updated successfully" });
   } catch (err: any) {
-    console.error("Error in /updateTimestamps:", err.message);
-    res.status(500).json({ error: "Failed to update timestamps" });
+    throw new Error(`Timestamp update failed: ${err.message}`);
   }
 };
 
+export const syncOrders = async (req: Request, res: Response): Promise<void> => {
+  try {
+    await performOrderSync();
+    res.status(200).json({ message: "Order sync completed successfully" });
+  } catch (err: any) {
+    console.error(`[${new Date().toISOString()}] Error during order sync: ${err.message}`);
+    res.status(500).json({ error: "Order sync failed" });
+  }
+};
+
+export const updateTimestamps = async (req: Request, res: Response): Promise<void> => {
+  try {
+    await performTimestampUpdate();
+    res.status(200).json({ message: "Timestamps updated successfully" });
+  } catch (err: any) {
+    console.error(`[${new Date().toISOString()}] Error in /updateTimestamps: ${err.message}`);
+    res.status(500).json({ error: "Failed to update timestamps" });
+  }
+};
