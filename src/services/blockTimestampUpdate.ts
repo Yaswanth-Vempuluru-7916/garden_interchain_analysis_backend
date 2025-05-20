@@ -259,16 +259,16 @@ export const updateTimestampsForOrders = async (orderIds: string[]): Promise<voi
       WHERE create_order_id = ANY($1)
         AND (
           (user_init_tx_hash IS NOT NULL AND user_init IS NULL AND source_chain IN ('ethereum', 'arbitrum', 'bitcoin')) OR
-          (user_redeem_tx_hash IS NOT NULL AND user_redeem IS NULL AND source_chain IN ('ethereum', 'arbitrum', 'bitcoin')) OR
+          (user_redeem_tx_hash IS NOT NULL AND user_redeem IS NULL AND destination_chain IN ('ethereum', 'arbitrum', 'bitcoin')) OR
           (user_refund_tx_hash IS NOT NULL AND user_refund IS NULL AND source_chain IN ('ethereum', 'arbitrum', 'bitcoin')) OR
           (cobi_init_tx_hash IS NOT NULL AND cobi_init IS NULL AND destination_chain IN ('ethereum', 'arbitrum', 'bitcoin')) OR
-          (cobi_redeem_tx_hash IS NOT NULL AND cobi_redeem IS NULL AND destination_chain IN ('ethereum', 'arbitrum', 'bitcoin')) OR
+          (cobi_redeem_tx_hash IS NOT NULL AND cobi_redeem IS NULL AND source_chain IN ('ethereum', 'arbitrum', 'bitcoin')) OR
           (cobi_refund_tx_hash IS NOT NULL AND cobi_refund IS NULL AND destination_chain IN ('ethereum', 'arbitrum', 'bitcoin')) OR
           (user_init_block_number IS NOT NULL AND user_init IS NULL AND source_chain NOT IN ('ethereum', 'arbitrum', 'bitcoin')) OR
-          (user_redeem_block_number IS NOT NULL AND user_redeem IS NULL AND source_chain NOT IN ('ethereum', 'arbitrum', 'bitcoin')) OR
+          (user_redeem_block_number IS NOT NULL AND user_redeem IS NULL AND destination_chain NOT IN ('ethereum', 'arbitrum', 'bitcoin')) OR
           (user_refund_block_number IS NOT NULL AND user_refund IS NULL AND source_chain NOT IN ('ethereum', 'arbitrum', 'bitcoin')) OR
           (cobi_init_block_number IS NOT NULL AND cobi_init IS NULL AND destination_chain NOT IN ('ethereum', 'arbitrum', 'bitcoin')) OR
-          (cobi_redeem_block_number IS NOT NULL AND cobi_redeem IS NULL AND destination_chain NOT IN ('ethereum', 'arbitrum', 'bitcoin')) OR
+          (cobi_redeem_block_number IS NOT NULL AND cobi_redeem IS NULL AND source_chain NOT IN ('ethereum', 'arbitrum', 'bitcoin')) OR
           (cobi_refund_block_number IS NOT NULL AND cobi_refund IS NULL AND destination_chain NOT IN ('ethereum', 'arbitrum', 'bitcoin'))
         )
     `;
@@ -325,17 +325,17 @@ export const updateTimestampsForOrders = async (orderIds: string[]): Promise<voi
                 })
               );
             }
-            if (user_redeem_tx_hash && !userRedeemTimestamp) {
-              timestampPromises.push(
-                getTimestampForTransaction(source_chain, user_redeem_tx_hash, user_redeem_block_number, create_order_id, "user_redeem_tx_hash").then((ts) => {
-                  userRedeemTimestamp = ts ? formatTimestampToIST(ts) : null;
-                })
-              );
-            }
             if (user_refund_tx_hash && !userRefundTimestamp) {
               timestampPromises.push(
                 getTimestampForTransaction(source_chain, user_refund_tx_hash, user_refund_block_number, create_order_id, "user_refund_tx_hash").then((ts) => {
                   userRefundTimestamp = ts ? formatTimestampToIST(ts) : null;
+                })
+              );
+            }
+            if (cobi_redeem_tx_hash && !cobiRedeemTimestamp) {
+              timestampPromises.push(
+                getTimestampForTransaction(source_chain, cobi_redeem_tx_hash, cobi_redeem_block_number, create_order_id, "cobi_redeem_tx_hash").then((ts) => {
+                  cobiRedeemTimestamp = ts ? formatTimestampToIST(ts) : null;
                 })
               );
             }
@@ -347,17 +347,17 @@ export const updateTimestampsForOrders = async (orderIds: string[]): Promise<voi
                 })
               );
             }
-            if (user_redeem_block_number && !userRedeemTimestamp) {
-              timestampPromises.push(
-                getTimestampForBlock(source_chain, user_redeem_block_number).then((ts) => {
-                  userRedeemTimestamp = ts ? formatTimestampToIST(ts) : null;
-                })
-              );
-            }
             if (user_refund_block_number && !userRefundTimestamp) {
               timestampPromises.push(
                 getTimestampForBlock(source_chain, user_refund_block_number).then((ts) => {
                   userRefundTimestamp = ts ? formatTimestampToIST(ts) : null;
+                })
+              );
+            }
+            if (cobi_redeem_block_number && !cobiRedeemTimestamp) {
+              timestampPromises.push(
+                getTimestampForBlock(source_chain, cobi_redeem_block_number).then((ts) => {
+                  cobiRedeemTimestamp = ts ? formatTimestampToIST(ts) : null;
                 })
               );
             }
@@ -375,10 +375,10 @@ export const updateTimestampsForOrders = async (orderIds: string[]): Promise<voi
                 })
               );
             }
-            if (cobi_redeem_tx_hash && !cobiRedeemTimestamp) {
+            if (user_redeem_tx_hash && !userRedeemTimestamp) {
               timestampPromises.push(
-                getTimestampForTransaction(destination_chain, cobi_redeem_tx_hash, cobi_redeem_block_number, create_order_id, "cobi_redeem_tx_hash").then((ts) => {
-                  cobiRedeemTimestamp = ts ? formatTimestampToIST(ts) : null;
+                getTimestampForTransaction(destination_chain, user_redeem_tx_hash, user_redeem_block_number, create_order_id, "user_redeem_tx_hash").then((ts) => {
+                  userRedeemTimestamp = ts ? formatTimestampToIST(ts) : null;
                 })
               );
             }
@@ -397,10 +397,10 @@ export const updateTimestampsForOrders = async (orderIds: string[]): Promise<voi
                 })
               );
             }
-            if (cobi_redeem_block_number && !cobiRedeemTimestamp) {
+            if (user_redeem_block_number && !userRedeemTimestamp) {
               timestampPromises.push(
-                getTimestampForBlock(destination_chain, cobi_redeem_block_number).then((ts) => {
-                  cobiRedeemTimestamp = ts ? formatTimestampToIST(ts) : null;
+                getTimestampForBlock(destination_chain, user_redeem_block_number).then((ts) => {
+                  userRedeemTimestamp = ts ? formatTimestampToIST(ts) : null;
                 })
               );
             }
@@ -423,15 +423,15 @@ export const updateTimestampsForOrders = async (orderIds: string[]): Promise<voi
         const hasChanges =
           (user_init_tx_hash && !user_init && userInitTimestamp && (source_chain === "ethereum" || source_chain === "arbitrum" || source_chain === "bitcoin")) ||
           (cobi_init_tx_hash && !cobi_init && cobiInitTimestamp && (destination_chain === "ethereum" || destination_chain === "arbitrum" || destination_chain === "bitcoin")) ||
-          (user_redeem_tx_hash && !user_redeem && userRedeemTimestamp && (source_chain === "ethereum" || source_chain === "arbitrum" || source_chain === "bitcoin")) ||
+          (user_redeem_tx_hash && !user_redeem && userRedeemTimestamp && (destination_chain === "ethereum" || destination_chain === "arbitrum" || destination_chain === "bitcoin")) ||
           (user_refund_tx_hash && !user_refund && userRefundTimestamp && (source_chain === "ethereum" || source_chain === "arbitrum" || source_chain === "bitcoin")) ||
-          (cobi_redeem_tx_hash && !cobi_redeem && cobiRedeemTimestamp && (destination_chain === "ethereum" || destination_chain === "arbitrum" || destination_chain === "bitcoin")) ||
+          (cobi_redeem_tx_hash && !cobi_redeem && cobiRedeemTimestamp && (source_chain === "ethereum" || source_chain === "arbitrum" || source_chain === "bitcoin")) ||
           (cobi_refund_tx_hash && !cobi_refund && cobiRefundTimestamp && (destination_chain === "ethereum" || destination_chain === "arbitrum" || destination_chain === "bitcoin")) ||
           (user_init_block_number && !user_init && userInitTimestamp && source_chain !== "ethereum" && source_chain !== "arbitrum" && source_chain !== "bitcoin") ||
           (cobi_init_block_number && !cobi_init && cobiInitTimestamp && destination_chain !== "ethereum" && destination_chain !== "arbitrum" && destination_chain !== "bitcoin") ||
-          (user_redeem_block_number && !user_redeem && userRedeemTimestamp && source_chain !== "ethereum" && source_chain !== "arbitrum" && source_chain !== "bitcoin") ||
+          (user_redeem_block_number && !user_redeem && userRedeemTimestamp && destination_chain !== "ethereum" && destination_chain !== "arbitrum" && destination_chain !== "bitcoin") ||
           (user_refund_block_number && !user_refund && userRefundTimestamp && source_chain !== "ethereum" && source_chain !== "arbitrum" && source_chain !== "bitcoin") ||
-          (cobi_redeem_block_number && !cobi_redeem && cobiRedeemTimestamp && destination_chain !== "ethereum" && destination_chain !== "arbitrum" && destination_chain !== "bitcoin") ||
+          (cobi_redeem_block_number && !cobi_redeem && cobiRedeemTimestamp && source_chain !== "ethereum" && source_chain !== "arbitrum" && source_chain !== "bitcoin") ||
           (cobi_refund_block_number && !cobi_refund && cobiRefundTimestamp && destination_chain !== "ethereum" && destination_chain !== "arbitrum" && destination_chain !== "bitcoin");
 
         if (hasChanges) {
