@@ -27,38 +27,38 @@ async function checkDbConnection() {
   }
 }
 
-let isRunning = false;
+// let isRunning = false;
 
-async function runSyncAndUpdate() {
-  if (isRunning) {
-    console.log(`Previous job still running, skipping this run...`);
-    return;
-  }
-  isRunning = true;
-  console.log(`Starting sync and timestamp update...`);
-  try {
-    await checkDbConnection();
-    await performOrderSync();
-    console.log(`Sync completed, proceeding to update timestamps...`);
-    await performTimestampUpdate();
-    console.log(`Timestamp update completed.`);
-  } catch (err: any) {
-    console.error(`Error during sync/update: ${err.message}\nStack: ${err.stack}`);
-  } finally {
-    isRunning = false;
-    console.log(`Job finished, isRunning reset to false.`);
-  }
-}
+// async function runSyncAndUpdate() {
+//   if (isRunning) {
+//     console.log(`Previous job still running, skipping this run...`);
+//     return;
+//   }
+//   isRunning = true;
+//   console.log(`Starting sync and timestamp update...`);
+//   try {
+//     await checkDbConnection();
+//     await performOrderSync();
+//     console.log(`Sync completed, proceeding to update timestamps...`);
+//     await performTimestampUpdate();
+//     console.log(`Timestamp update completed.`);
+//   } catch (err: any) {
+//     console.error(`Error during sync/update: ${err.message}\nStack: ${err.stack}`);
+//   } finally {
+//     isRunning = false;
+//     console.log(`Job finished, isRunning reset to false.`);
+//   }
+// }
 
-const scheduleSyncAndUpdate = () => {
-  // Schedule for every 12 hours (midnight and noon UTC)
-  cron.schedule("0 0,12 * * *", async () => {
-    await runSyncAndUpdate();
-  }, { timezone: "UTC" });
-  console.log(`Cron job scheduled to run sync and updateTimestamps every 12 hours in UTC.`);
+// const scheduleSyncAndUpdate = () => {
+//   // Schedule for every 12 hours (midnight and noon UTC)
+//   cron.schedule("0 0,12 * * *", async () => {
+//     await runSyncAndUpdate();
+//   }, { timezone: "UTC" });
+//   console.log(`Cron job scheduled to run sync and updateTimestamps every 12 hours in UTC.`);
 
 
-};
+// };
 
 const port = process.env.PORT || 3000;
 checkDbConnection()
@@ -66,7 +66,7 @@ checkDbConnection()
     initTable()
       .then(() => {
         app.use("/", routes);
-        scheduleSyncAndUpdate();
+        // scheduleSyncAndUpdate();
         app.listen(port, () => {
           console.log(`Backend running on http://localhost:${port}`);
         });
