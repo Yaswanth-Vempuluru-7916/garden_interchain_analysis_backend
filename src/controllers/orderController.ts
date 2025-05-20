@@ -282,7 +282,7 @@ export const getChainCombinationAverages = async (
       ) AS avg_cobi_init_duration,
       AVG(CASE WHEN o.user_redeem IS NOT NULL AND o.user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (o.user_redeem - o.cobi_init)), 0) END) AS avg_user_redeem_duration,
       AVG(CASE WHEN o.user_refund IS NOT NULL AND o.user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (o.user_refund - o.user_init)), 0) END) AS avg_user_refund_duration,
-      AVG(CASE WHEN o.cobi_redeem IS NOT NULL AND o.cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (o.cobi_redeem - o.cobi_init)), 0) END) AS avg_cobi_redeem_duration,
+      AVG(CASE WHEN o.cobi_redeem IS NOT NULL AND o.user_redeem IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (o.cobi_redeem - o.user_redeem)), 0) END) AS avg_cobi_redeem_duration,
       AVG(CASE WHEN o.cobi_refund IS NOT NULL AND o.cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (o.cobi_refund - o.cobi_init)), 0) END) AS avg_cobi_refund_duration,
       s.q1_user_init_duration,
       s.q3_user_init_duration,
@@ -312,7 +312,8 @@ export const getChainCombinationAverages = async (
           (s.q3_cobi_init_duration + 1.5 * (s.q3_cobi_init_duration - s.q1_cobi_init_duration)))
         AND (o.user_redeem IS NULL OR o.user_init IS NULL OR GREATEST(EXTRACT(EPOCH FROM (o.user_redeem - o.cobi_init)), 0) <= 
           (s.q3_user_redeem_duration + 1.5 * (s.q3_user_redeem_duration - s.q1_user_redeem_duration)))
-        AND (o.cobi_redeem IS NULL OR o.cobi_init IS NULL OR GREATEST(EXTRACT(EPOCH FROM (o.cobi_redeem - o.cobi_init)), 0) <= 
+        -- Changed anomaly filter for cobi_redeem_duration to use cobi_redeem - user_redeem instead of cobi_redeem - cobi_init
+        AND (o.cobi_redeem IS NULL OR o.user_redeem IS NULL OR GREATEST(EXTRACT(EPOCH FROM (o.cobi_redeem - o.user_redeem)), 0) <= 
           (s.q3_cobi_redeem_duration + 1.5 * (s.q3_cobi_redeem_duration - s.q1_cobi_redeem_duration)))
       )
     GROUP BY o.source_chain, o.destination_chain, 
@@ -327,12 +328,12 @@ export const getChainCombinationAverages = async (
     SELECT MAX(created_at) AS last_updated
     FROM ${ORDERS_TABLE}
     WHERE (
-        (user_init_block_number IS NOT NULL AND user_init IS NOT NULL) OR
-        (user_redeem_block_number IS NOT NULL AND user_redeem IS NOT NULL) OR
-        (user_refund_block_number IS NOT NULL AND user_refund IS NOT NULL) OR
-        (cobi_init_block_number IS NOT NULL AND cobi_init IS NOT NULL) OR
-        (cobi_redeem_block_number IS NOT NULL AND cobi_redeem IS NOT NULL) OR
-        (cobi_refund_block_number IS NOT NULL AND cobi_refund IS NOT NULL)
+      (user_init_block_number IS NOT NULL AND user_init IS NOT NULL) OR
+      (user_redeem_block_number IS NOT NULL AND user_redeem IS NOT NULL) OR
+      (user_refund_block_number IS NOT NULL AND user_refund IS NOT NULL) OR
+      (cobi_init_block_number IS NOT NULL AND cobi_init IS NOT NULL) OR
+      (cobi_redeem_block_number IS NOT NULL AND cobi_redeem IS NOT NULL) OR
+      (cobi_refund_block_number IS NOT NULL AND cobi_refund IS NOT NULL)
     );
   `;
 
@@ -379,34 +380,34 @@ export const getChainCombinationAverages = async (
         user_init_duration: {
           lower: row.q1_user_init_duration && row.q3_user_init_duration
             ? parseFloat(row.q1_user_init_duration) - 1.5 * (parseFloat(row.q3_user_init_duration) - parseFloat(row.q1_user_init_duration))
-            : null,
+              : null,
           upper: row.q1_user_init_duration && row.q3_user_init_duration
             ? parseFloat(row.q3_user_init_duration) + 1.5 * (parseFloat(row.q3_user_init_duration) - parseFloat(row.q1_user_init_duration))
-            : null,
+              : null,
         },
         cobi_init_duration: {
           lower: row.q1_cobi_init_duration && row.q3_cobi_init_duration
             ? parseFloat(row.q1_cobi_init_duration) - 1.5 * (parseFloat(row.q3_cobi_init_duration) - parseFloat(row.q1_cobi_init_duration))
-            : null,
+              : null,
           upper: row.q1_cobi_init_duration && row.q3_cobi_init_duration
             ? parseFloat(row.q3_cobi_init_duration) + 1.5 * (parseFloat(row.q3_cobi_init_duration) - parseFloat(row.q1_cobi_init_duration))
-            : null,
+              : null,
         },
         user_redeem_duration: {
           lower: row.q1_user_redeem_duration && row.q3_user_redeem_duration
             ? parseFloat(row.q1_user_redeem_duration) - 1.5 * (parseFloat(row.q3_user_redeem_duration) - parseFloat(row.q1_user_redeem_duration))
-            : null,
+              : null,
           upper: row.q1_user_redeem_duration && row.q3_user_redeem_duration
             ? parseFloat(row.q3_user_redeem_duration) + 1.5 * (parseFloat(row.q3_user_redeem_duration) - parseFloat(row.q1_user_redeem_duration))
-            : null,
+              : null,
         },
         cobi_redeem_duration: {
           lower: row.q1_cobi_redeem_duration && row.q3_cobi_redeem_duration
             ? parseFloat(row.q1_cobi_redeem_duration) - 1.5 * (parseFloat(row.q3_cobi_redeem_duration) - parseFloat(row.q1_cobi_redeem_duration))
-            : null,
+              : null,
           upper: row.q1_cobi_redeem_duration && row.q3_cobi_redeem_duration
             ? parseFloat(row.q3_cobi_redeem_duration) + 1.5 * (parseFloat(row.q3_cobi_redeem_duration) - parseFloat(row.q1_cobi_redeem_duration))
-            : null,
+              : null,
         },
       };
     });
