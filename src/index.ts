@@ -27,56 +27,56 @@ async function checkDbConnection() {
   }
 }
 
-// let isRunning = false;
+// Prevent overlapping job executions
+let isRunning = false;
 
-// async function runSyncAndUpdate() {
-//   if (isRunning) {
-//     console.log(`Previous job still running, skipping this run...`);
-//     return;
-//   }
-//   isRunning = true;
-//   console.log(`Starting sync and timestamp update...`);
-//   try {
-//     await checkDbConnection();
-//     await performOrderSync();
-//     console.log(`Sync completed, proceeding to update timestamps...`);
-//     await performTimestampUpdate();
-//     console.log(`Timestamp update completed.`);
-//   } catch (err: any) {
-//     console.error(`Error during sync/update: ${err.message}\nStack: ${err.stack}`);
-//   } finally {
-//     isRunning = false;
-//     console.log(`Job finished, isRunning reset to false.`);
-//   }
-// }
+async function runSyncAndUpdate() {
+  if (isRunning) {
+    console.log(`Previous job still running, skipping this run...`);
+    return;
+  }
+  isRunning = true;
+  console.log(`Starting sync and timestamp update...`);
+  try {
+    await checkDbConnection();
+    console.log(`Sync started...`);
+    await performOrderSync();
+    console.log(`Sync completed, proceeding to update timestamps...`);
+    await performTimestampUpdate();
+    console.log(`Timestamp update completed.`);
+  } catch (err: any) {
+    console.error(`Error during sync/update: ${err.message}\nStack: ${err.stack}`);
+  } finally {
+    isRunning = false;
+    console.log(`Job finished, isRunning reset to false.`);
+  }
+}
 
-// const scheduleSyncAndUpdate = () => {
-//   // Schedule for every 12 hours (midnight and noon UTC)
-//   cron.schedule("0 0,12 * * *", async () => {
-//     await runSyncAndUpdate();
-//   }, { timezone: "UTC" });
-//   console.log(`Cron job scheduled to run sync and updateTimestamps every 12 hours in UTC.`);
+function scheduleSyncAndUpdate() {
 
+  cron.schedule("0 */2 * * *", async () => {
+    await runSyncAndUpdate();
+  }, { timezone: "UTC" });
 
-// };
+  console.log(`Cron job scheduled to run every 5 minutes (UTC)`);
+}
 
-const port = process.env.PORT || 3000;
-checkDbConnection()
-  .then(() => {
-    initTable()
-      .then(() => {
-        app.use("/", routes);
-        // scheduleSyncAndUpdate();
-        app.listen(port, () => {
-          console.log(`Backend running on http://localhost:${port}`);
-        });
-      })
-      .catch((err) => {
-        console.error(` Failed to initialize table: ${err.message}`);
-        process.exit(1);
-      });
-  })
-  .catch((err) => {
-    console.error(` Failed to connect to database: ${err.message}`);
+async function startServer() {
+  try {
+    await checkDbConnection();
+    await initTable();
+
+    app.use("/", routes);
+    scheduleSyncAndUpdate();
+
+    const port = process.env.PORT || 3000;
+    app.listen(port, () => {
+      console.log(`Backend running on http://localhost:${port}`);
+    });
+  } catch (err: any) {
+    console.error(`Startup failed: ${err.message}`);
     process.exit(1);
-  });
+  }
+}
+
+startServer();
