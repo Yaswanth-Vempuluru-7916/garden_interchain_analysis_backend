@@ -281,9 +281,9 @@ export const getChainCombinationAverages = async (
         0
       ) AS avg_cobi_init_duration,
       AVG(CASE WHEN o.user_redeem IS NOT NULL AND o.user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (o.user_redeem - o.cobi_init)), 0) END) AS avg_user_redeem_duration,
-      AVG(CASE WHEN o.user_refund IS NOT NULL AND o.user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (o.user_refund - o.user_init)), 0) END) AS avg_user_refund_duration,
+      AVG(CASE WHEN o.user_refund IS NOT NULL AND o.cobi_refund IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (o.user_refund - o.cobi_refund)), 0) END) AS avg_user_refund_duration,
       AVG(CASE WHEN o.cobi_redeem IS NOT NULL AND o.user_redeem IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (o.cobi_redeem - o.user_redeem)), 0) END) AS avg_cobi_redeem_duration,
-      AVG(CASE WHEN o.cobi_refund IS NOT NULL AND o.cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (o.cobi_refund - o.cobi_init)), 0) END) AS avg_cobi_refund_duration,
+      AVG(CASE WHEN o.cobi_refund IS NOT NULL AND o.cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM ((o.cobi_refund - INTERVAL '2 hours') - o.cobi_init)), 0) END) AS avg_cobi_refund_duration,
       s.q1_user_init_duration,
       s.q3_user_init_duration,
       s.q1_cobi_init_duration,
@@ -469,8 +469,8 @@ export const getAllIndividualOrders = async (
         CASE WHEN cobi_init IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_init - user_init)), 0) END AS cobi_init_duration,
         CASE WHEN user_redeem IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_redeem - cobi_init)), 0) END AS user_redeem_duration,
         CASE WHEN cobi_redeem IS NOT NULL AND user_redeem IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_redeem - user_redeem)), 0) END AS cobi_redeem_duration,
-        CASE WHEN user_refund IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_refund - user_init)), 0) END AS user_refund_duration,
-        CASE WHEN cobi_refund IS NOT NULL AND cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_refund - cobi_init)), 0) END AS cobi_refund_duration
+        CASE WHEN user_refund IS NOT NULL AND cobi_refund IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_refund - cobi_refund)), 0) END AS user_refund_duration,
+        CASE WHEN cobi_refund IS NOT NULL AND cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM ((cobi_refund - INTERVAL '2 hours') - cobi_init)), 0) END AS cobi_refund_duration
       FROM ${ORDERS_TABLE}
       WHERE created_at BETWEEN $1 AND $2
         AND (
@@ -810,8 +810,8 @@ export const getAnomalyOrders = async (
         CASE WHEN cobi_init IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_init - user_init)), 0) END AS cobi_init_duration,
         CASE WHEN user_redeem IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_redeem - cobi_init)), 0) END AS user_redeem_duration,
         CASE WHEN cobi_redeem IS NOT NULL AND user_redeem IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_redeem - user_redeem)), 0) END AS cobi_redeem_duration,
-        CASE WHEN user_refund IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_refund - user_init)), 0) END AS user_refund_duration,
-        CASE WHEN cobi_refund IS NOT NULL AND cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_refund - cobi_init)), 0) END AS cobi_refund_duration
+        CASE WHEN user_refund IS NOT NULL AND cobi_refund IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_refund - cobi_refund)), 0) END AS user_refund_duration,
+        CASE WHEN cobi_refund IS NOT NULL AND cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM ((cobi_refund - INTERVAL '2 hours') - cobi_init)), 0) END AS cobi_refund_duration
       FROM ${ORDERS_TABLE}
       WHERE created_at BETWEEN $1 AND $2
         AND (
