@@ -19,7 +19,8 @@ const requiredEnvVars = [
   "RPC_URL_HYPERLIQUID",
   "RPC_URL_BITCOIN",
   "RPC_URL_BERA",
-  "RPC_URL_BITCOIN_TX"
+  "RPC_URL_BITCOIN_TX",
+  "RPC_URL_UNICHAIN"
 ];
 const missingEnvVars = requiredEnvVars.filter((varName) => !process.env[varName]);
 if (missingEnvVars.length > 0) {
@@ -33,6 +34,10 @@ const alchemyInstances = {
   bera: new Alchemy({
     apiKey: process.env.ALCHEMY_TOKEN,
     url: `${process.env.RPC_URL_BERA}/${process.env.ALCHEMY_TOKEN}`,
+  }),
+  unichain: new Alchemy({
+    apiKey: process.env.ALCHEMY_TOKEN,
+    url: `${process.env.RPC_URL_UNICHAIN}/${process.env.ALCHEMY_TOKEN}`,
   }),
   arbitrum: new Alchemy({ apiKey: process.env.ALCHEMY_TOKEN, network: Network.ARB_MAINNET }),
 };
@@ -66,7 +71,7 @@ const getTimestampForBlock = async (chain: string, blockNumber: number | null): 
 
   let rpcChain = chain;
 
-  if (["base", "bera"].includes(rpcChain)) {
+  if (["base", "bera","unichain"].includes(rpcChain)) {
     try {
       const alchemy = alchemyInstances[rpcChain as keyof typeof alchemyInstances];
       const block = await alchemy.core.getBlock(Number(blockNumber));

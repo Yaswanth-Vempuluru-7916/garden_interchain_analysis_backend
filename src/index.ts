@@ -54,11 +54,11 @@ async function runSyncAndUpdate() {
 
 function scheduleSyncAndUpdate() {
 
-  cron.schedule("0 */2 * * *", async () => {
+  cron.schedule("0 */12 * * *", async () => {
     await runSyncAndUpdate();
   }, { timezone: "UTC" });
 
-  console.log(`Cron job scheduled to run every 5 minutes (UTC)`);
+  console.log(`Cron job scheduled to run every 12 hrs (UTC)`);
 }
 
 async function startServer() {

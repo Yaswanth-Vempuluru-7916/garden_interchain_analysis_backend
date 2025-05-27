@@ -27,6 +27,7 @@ export const supportedChains = [
   "hyperliquid",
   "starknet",
   "bera",
+  "unichain"
 ];
 
 export const ORDERS_TABLE = "final_orders"
